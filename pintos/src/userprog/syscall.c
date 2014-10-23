@@ -16,8 +16,70 @@ syscall_init (void)
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
 {
-  printf ("system call!\n");
-  thread_exit ();
+  int arg[MAX_ARGS];
+  switch(*(int *) esp)
+  {
+  	case system_halt:
+  	{
+  		halt();
+  		break;
+  	}
+  	case system_exit:
+  	{
+  		exit(arg[0]);
+  		break;
+  	}
+  	case system_exec:
+  	{
+  		break;
+  	}
+  	case system_wait:
+  	{
+  		f->eax = wait(arg[0]);
+  		break;
+  	}
+  	case system_remove:
+  	{
+  		f->eax = remove((const char*) arg[0]);
+  		break;
+  	}
+  	case system_open:
+  	{
+  		f->eax = open((const char *) arg[0]);
+  		break;
+  	}
+  	case system_filesize:
+  	{
+  		f->eax = filesize(arg[0]);
+  		break;
+  	}
+  	case system_read:
+  	{
+  		f->eax = read(arg[0], (void *) arg[1], (unsigned) arg[2]);
+  		break;
+  	}
+  	case system_write:
+  	{
+  		f->eax = write(arg[0], (const void *) arg[1], (unsigned) arg[2]);
+  		break;
+  	}
+  	case system_seek:
+  	{
+  		seek(arg[0], (unsigned) arg[1]);
+  		break;
+  	}
+  	case system_tell:
+  	{
+  		f->eax = tell(arg[0]);
+  		break;
+  	}
+  	case system_close:
+  	{
+  		close(arg[0]);
+  		break;
+  	}
+
+  }
 
   // Need to make swtich cases here for each syscall
   // Need to pass pointer to user mem stack pointer
@@ -151,10 +213,16 @@ filesize (int fd)
 	return size;
 }
 
+/* Reads size bytes from the file open as fd into buffer.
+   Returns the number of bytes actually read (0 at the
+   end of a file), or -1 if the file could not be read.
+   Fd 0 reads from the keyboard using input_getc(). */
 int
 read (int fd, void *buffer, unsigned size)
 {
-
+	int i;
+	uint8_t* buff = (uint8_t *) buffer;
+	
 }
 
 int
@@ -169,10 +237,45 @@ seek (int fd, unsigned position)
 
 }
 
+/* Returns the position of the next byte to be read
+   or written in open file fd, expressed as in bytes
+   from the beginning of the file. */
 unsigned 
 tell (int fd)
 {
+	lock_acquire(&lock);
+	struct file *f;
+	// Get the file attributed to this fd
+	f = get_file(fd);
+	if(f != NULL) 
+	{
+		// file_tell gets the offset of the next byte
+		off_t next = file_tell(f->file);
+	}
+	lock_release(&lock);
+	return next;
+	
 
+}
+
+struct 
+file* get_file (int fd)
+{
+	struct threat *t = thread_current();
+	struct list_elem *e;
+
+	for(e = list_begin(&files); e != list_end(&files); e = list_next(e))
+	{
+		struct file_attr fa = list_entry(e, struct file_attr, elem);
+		if(fa->fd == fd)
+		{
+			return fa->file;
+		} 
+		else 
+		{
+			return NULL;
+		}
+	}
 }
 
 void
