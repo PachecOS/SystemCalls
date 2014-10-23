@@ -220,9 +220,47 @@ filesize (int fd)
 int
 read (int fd, void *buffer, unsigned size)
 {
-	int i;
-	uint8_t* buff = (uint8_t *) buffer;
+
+	lock_acquire(&lock);
+
+	if (fd == 0) 
+	{
+		int i = 0;
+		uint8_t* buff = (uint8_t *) buffer;
 	
+		while (i < size) 
+		{
+			//devices/input.h
+			buff[i] = input_getc();
+
+			i++;
+
+			if (i >= size) {
+				break;
+			}
+		}
+	}
+	else 
+	{
+		struct file_attr *fa;
+		struct list_elem *e;
+		int bytes = 0;
+
+		for (e = list_begin (&files); e != list_end (&files);
+		 	 e = list_next (e))
+		{
+			fa = list_entry (e, struct file_attr, elem);
+			
+			if (fa->fd == fd)
+			{
+				bytes = file_read(&fa->file, buffer, size);
+				return bytes;
+			}
+		}	
+	}
+	lock_release(&lock);
+
+	return -1;
 }
 
 int
@@ -234,7 +272,23 @@ write (int fd, const void *buffer, unsigned size)
 void
 seek (int fd, unsigned position)
 {
+	lock_acquire(&lock);
 
+	struct file_attr *fa;
+	struct list_elem *e;
+
+	for (e = list_begin (&files); e != list_end (&files);
+		 e - list_next (e))
+	{
+		fa = list_entry (e, struct file_attr, elem);
+		if (fa->fd == fd)
+		{
+			file_seek(fa->file, position);
+		}
+	}
+
+
+	lock_release(&lock);
 }
 
 /* Returns the position of the next byte to be read
@@ -281,6 +335,24 @@ file* get_file (int fd)
 void
 close (int fd)
 {
+
+	lock_acquire(&lock);
+
+	struct file_attr *fa;
+
+	for(e = list_begin(&files); e != list_end(&files); e = list_next(e)) 
+	{
+		fa = list_entry(e, struct file_attr, elem);
+
+		if ((fa->fd == fd) || (fa->fd == CLOSE))
+		{
+			file_close(fa->file);
+			list_remove(&fa->elem);
+		}
+	}
+
+
+	lock_release(&lock);
 
 }
 
