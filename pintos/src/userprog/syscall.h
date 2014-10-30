@@ -29,7 +29,6 @@ struct child_p {
 
 struct file_attr {
 	int fd;
-	struct list_elem elem;
 	struct file *file;
 };
 

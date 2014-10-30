@@ -41,6 +41,20 @@ void cond_wait (struct condition *, struct lock *);
 void cond_signal (struct condition *, struct lock *);
 void cond_broadcast (struct condition *, struct lock *);
 
+/* Monitor struct for System Calls */
+struct wait_info 
+{
+  struct lock mutex_lock;
+  struct condition completed;
+  int status;
+  pid_t child_pid;
+  bool child_exit;
+  bool parent_exit;
+  bool parent_waiting_on_child;
+
+};
+
+
 /* Optimization barrier.
 
    The compiler will not reorder operations across an

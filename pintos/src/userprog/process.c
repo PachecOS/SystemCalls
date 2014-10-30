@@ -21,6 +21,15 @@
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
+/* Initialize the start struct */
+void
+start_struct_init(struct start_struct *ss, unsigned value, char* fn)
+{
+  ss->start_synch = value;
+  ss->success = 0;
+  ss->fn_copy = fn;
+}
+
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
@@ -28,10 +37,11 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp);
 tid_t
 process_execute (const char *file_name) 
 {
+  // Need to modify this method
   char *fn_copy;
   char *parse;
   tid_t tid;
-
+  struct start_struct *start;
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
@@ -39,10 +49,18 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
+  start_struct_init(&start, 0, fn_copy);
+  sema_down(start->start_synch);
+
+  if(start->success)
+  {
+
+  }
+
   // Parse by strings
   parse = strtok_r((char*) file_name, " ", parse);
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (file_name, PRI_DEFAULT, start_process, start->fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   return tid;
@@ -56,9 +74,9 @@ start_process (void *file_name_)
   char *file_name = file_name_;
   struct intr_frame if_;
   bool success;
+  char *args;
+  int i = 0;
 
-  char *parse;
-  parse = strtok_r((char *) file_name, " ", parse);
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
@@ -68,9 +86,12 @@ start_process (void *file_name_)
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
-  if (!success) 
+  if (!success)
+  { 
     thread_exit ();
+  }
 
+  args = args_parse(if_, file_name);
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -79,6 +100,47 @@ start_process (void *file_name_)
      and jump to it. */
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
   NOT_REACHED ();
+}
+
+static
+char* args_parse(struct intr_frame intr, char *args)
+{
+  char *token;
+  char **save_ptr = intr->esp;
+  char *save_args_temp = malloc(sizeof(char*));
+  char **argv = malloc(sizeof(sizeof(char*)) * 2);
+
+  int i, argc = 0; 
+  int align;
+  int bits = 2;
+
+  // Iterate each token
+  for(token = (char*) args; token != NULL; 
+                                  token = strtok_r(NULL, " ", save_ptr))
+  {
+    intr->esp = intr->esp - sizeof(token) + 1;
+    argv[argc] = intr->esp;
+    argc++;
+
+    // If the size of argc is less than 2 bits
+    if(argc >= bits)
+    { 
+      // Multiply to keep track of the bits
+      bits = bits * 2;
+      // Realloc the size of the argv array to the size of the bits
+      argv = realloc(argv, bits*sizeof(char *));
+    }    
+    // Copy the token (args) in to the save_ptry (the stack)
+    memcpy(save_ptr, token, sizeof(token) +1);
+  }
+
+
+  uint8_t word_align = 0;
+
+ 
+
+
+
 }
 
 /* Waits for thread TID to die and returns its exit status.  If
@@ -442,12 +504,12 @@ setup_stack (void **esp)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
-        *esp = PHYS_BASE - 12;
+        *esp = PHYS_BASE - esp;
       else
         palloc_free_page (kpage);
     }
+
     return success;
-  // Need to set up stack later
 
 }
 
