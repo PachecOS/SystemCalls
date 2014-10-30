@@ -21,6 +21,15 @@
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
+/* Initialize the start struct */
+void
+start_struct_init(struct start_struct *ss, unsigned value, char* fn)
+{
+  ss->start_synch = value;
+  ss->success = 0;
+  ss->fn_copy = fn;
+}
+
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
@@ -28,10 +37,11 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp);
 tid_t
 process_execute (const char *file_name) 
 {
+  // Need to modify this method
   char *fn_copy;
   char *parse;
   tid_t tid;
-
+  struct start_struct *start;
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
@@ -39,10 +49,18 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
+  start_struct_init(&start, 0, fn_copy);
+  sema_down(start->start_synch);
+
+  if(start->success)
+  {
+
+  }
+
   // Parse by strings
   parse = strtok_r((char*) file_name, " ", parse);
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (file_name, PRI_DEFAULT, start_process, start->fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   return tid;
@@ -56,9 +74,9 @@ start_process (void *file_name_)
   char *file_name = file_name_;
   struct intr_frame if_;
   bool success;
+  char *args;
+  int i = 0;
 
-  char *parse;
-  parse = strtok_r((char *) file_name, " ", parse);
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
@@ -68,8 +86,11 @@ start_process (void *file_name_)
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
-  if (!success) 
+  if (!success)
+  { 
     thread_exit ();
+  }
+
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -79,6 +100,67 @@ start_process (void *file_name_)
      and jump to it. */
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
   NOT_REACHED ();
+}
+
+static
+char* args_parse(struct intr_frame intr)
+{
+  char *token;
+  char *parse = strtok_r((char *) file_name, " ", parse);
+  char *save_args_temp = malloc(sizeof(char*));
+  char **argv = malloc(sizeof(sizeof(char*)) * 2);
+
+  int i, y, j, size, argc = 0; 
+  int align;
+
+  // Iterate each token
+  for(token = (char*) file_name; token != NULL; parse)
+  {
+    // If the size of the save pointer is less than what we are storing
+    if(sizeof(save_args_temp) < sizeof(parse))
+    {
+      // Double the size of the save pointer
+      save_args_temp = (char *)realloc(
+                        save_args_temp, sizeof(char *save_args_temp) * 2);
+      // Store the arg
+      save_args_temp[i] = parse;
+      size += sizeof(parse);
+      i++;
+
+    }
+    // Else just store the arg, keep track of size of args
+    save_args_temp[i] = parse;
+    size += sizeof(parse);
+    i++;
+  }
+  // We need to free temp, so put it in another array
+  char *save_ptr[size];
+  for(int j = 0; j < size; j++)
+  {
+    save_ptr[j] = save_args_temp[j];
+  }
+
+  free(save_args_temp);
+
+  // Need to word align
+
+  align = size % sizeof(char*);
+  align = sizeof(char *) - align;
+  intr->esp -= align;
+
+  argc = i;
+
+
+  // Push save_ptr[size] for each y, backwards
+  for(y = size-1; y >= 0; y--)     
+  {
+    intr->esp = sizeof(char*);
+    memcpy(intr->esp, &save_ptr[size], y);
+
+  }
+
+    
+
 }
 
 /* Waits for thread TID to die and returns its exit status.  If
@@ -442,12 +524,12 @@ setup_stack (void **esp)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
-        *esp = PHYS_BASE - 12;
+        *esp = PHYS_BASE - esp;
       else
         palloc_free_page (kpage);
     }
+
     return success;
-  // Need to set up stack later
 
 }
 
