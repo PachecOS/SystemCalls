@@ -91,7 +91,7 @@ start_process (void *file_name_)
     thread_exit ();
   }
 
-
+  args = args_parse(if_, file_name);
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -103,63 +103,43 @@ start_process (void *file_name_)
 }
 
 static
-char* args_parse(struct intr_frame intr)
+char* args_parse(struct intr_frame intr, char *args)
 {
   char *token;
-  char *parse = strtok_r((char *) file_name, " ", parse);
+  char **save_ptr = intr->esp;
   char *save_args_temp = malloc(sizeof(char*));
   char **argv = malloc(sizeof(sizeof(char*)) * 2);
 
-  int i, y, j, size, argc = 0; 
+  int i, argc = 0; 
   int align;
+  int bits = 2;
 
   // Iterate each token
-  for(token = (char*) file_name; token != NULL; parse)
+  for(token = (char*) args; token != NULL; 
+                                  token = strtok_r(NULL, " ", save_ptr))
   {
-    // If the size of the save pointer is less than what we are storing
-    if(sizeof(save_args_temp) < sizeof(parse))
-    {
-      // Double the size of the save pointer
-      save_args_temp = (char *)realloc(
-                        save_args_temp, sizeof(char *save_args_temp) * 2);
-      // Store the arg
-      save_args_temp[i] = parse;
-      size += sizeof(parse);
-      i++;
+    intr->esp = intr->esp - sizeof(token) + 1;
+    argv[argc] = intr->esp;
+    argc++;
 
-    }
-    // Else just store the arg, keep track of size of args
-    save_args_temp[i] = parse;
-    size += sizeof(parse);
-    i++;
-  }
-  // We need to free temp, so put it in another array
-  char *save_ptr[size];
-  for(int j = 0; j < size; j++)
-  {
-    save_ptr[j] = save_args_temp[j];
+    // If the size of argc is less than 2 bits
+    if(argc >= bits)
+    { 
+      // Multiply to keep track of the bits
+      bits = bits * 2;
+      // Realloc the size of the argv array to the size of the bits
+      argv = realloc(argv, bits*sizeof(char *));
+    }    
+    // Copy the token (args) in to the save_ptry (the stack)
+    memcpy(save_ptr, token, sizeof(token) +1);
   }
 
-  free(save_args_temp);
 
-  // Need to word align
+  uint8_t word_align = 0;
 
-  align = size % sizeof(char*);
-  align = sizeof(char *) - align;
-  intr->esp -= align;
-
-  argc = i;
+ 
 
 
-  // Push save_ptr[size] for each y, backwards
-  for(y = size-1; y >= 0; y--)     
-  {
-    intr->esp = sizeof(char*);
-    memcpy(intr->esp, &save_ptr[size], y);
-
-  }
-
-    
 
 }
 
