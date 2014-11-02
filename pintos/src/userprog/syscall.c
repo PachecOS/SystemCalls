@@ -5,6 +5,7 @@
 #include "threads/thread.h"
 
 static void syscall_handler (struct intr_frame *);
+static void strip_args(struct intr_frame *f, int total, int* arg);
 
 void
 syscall_init (void) 
@@ -16,7 +17,7 @@ syscall_init (void)
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
 {
-  int arg[MAX_ARGS];
+  int arg[3];
   switch(*(int *) esp)
   {
   	case system_halt:
@@ -26,6 +27,7 @@ syscall_handler (struct intr_frame *f UNUSED)
   	}
   	case system_exit:
   	{
+  		strip_args(f, 1, &arg[0]);
   		exit(arg[0]);
   		break;
   	}
@@ -35,6 +37,7 @@ syscall_handler (struct intr_frame *f UNUSED)
   	}
   	case system_wait:
   	{
+  		strip_args(f, 1, &arg[0]);
   		f->eax = wait(arg[0]);
   		break;
   	}
@@ -65,27 +68,44 @@ syscall_handler (struct intr_frame *f UNUSED)
   	}
   	case system_seek:
   	{
+  		strip_args(f, 2, &arg[0]);
   		seek(arg[0], (unsigned) arg[1]);
   		break;
   	}
   	case system_tell:
   	{
+  		strip_args(f, 1, &arg[0]);
   		f->eax = tell(arg[0]);
   		break;
   	}
   	case system_close:
   	{
+  		strip_args(f, 1, &arg[0]);
   		close(arg[0]);
   		break;
   	}
 
   }
+}
 
-  // Need to make swtich cases here for each syscall
-  // Need to pass pointer to user mem stack pointer
-  // Validate the pointers, and parse those args
-  // After we get the args from the stack we can then
-  // use them for each syscall.
+static void
+strip_args(struct intr_frame *f, int total, int* arg)
+{
+	int i;
+	int *temp;
+	for(i = 0; i < total; i++)
+	{
+		temp = f->esp + i + 1;
+		if(temp < (void *) 0x08048000)
+		{
+			exit(-1);
+		}
+
+		if(!temp < (void *) 0xc0000000)
+		{
+			exit(-1);
+		}
+	}
 }
 
 /* Terminates Pintos by calling shutdown_power_off() */
@@ -113,7 +133,6 @@ pid_t
 exec(const char* cmd_line)
 {
 	pid_t name = process_execute(cmd_line);
-	struct child_p *child = curr_child(name);
 
 	if(load(name, void (**eip) (void), void **esp))
 	{

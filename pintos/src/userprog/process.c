@@ -41,7 +41,7 @@ process_execute (const char *file_name)
   char *fn_copy;
   char *parse;
   tid_t tid;
-  struct start_struct *start;
+  //struct start_struct *start;
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
@@ -49,18 +49,18 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
-  start_struct_init(&start, 0, fn_copy);
-  sema_down(start->start_synch);
+  //start_struct_init(&start, 0, fn_copy);
+  //sema_down(start->start_synch);
 
-  if(start->success)
+ /* if(start->success)
   {
 
-  }
+  } */
 
   // Parse by strings
   parse = strtok_r((char*) file_name, " ", parse);
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, start->fn_copy);
+  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   return tid;
@@ -74,7 +74,6 @@ start_process (void *file_name_)
   char *file_name = file_name_;
   struct intr_frame if_;
   bool success;
-  char *args;
   int i = 0;
 
   /* Initialize interrupt frame and load executable. */
@@ -91,7 +90,7 @@ start_process (void *file_name_)
     thread_exit ();
   }
 
-  args = args_parse(if_, file_name);
+  args_parse(if_, file_name);
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -103,11 +102,10 @@ start_process (void *file_name_)
 }
 
 static
-char* args_parse(struct intr_frame intr, char *args)
+void args_parse(struct intr_frame intr, char *args)
 {
   char *token;
   char **save_ptr = intr->esp;
-  char *save_args_temp = malloc(sizeof(char*));
   char **argv = malloc(sizeof(sizeof(char*)) * 2);
 
   int i, argc = 0; 
@@ -118,11 +116,11 @@ char* args_parse(struct intr_frame intr, char *args)
   for(token = (char*) args; token != NULL; 
                                   token = strtok_r(NULL, " ", save_ptr))
   {
-    intr->esp = intr->esp - sizeof(token) + 1;
+    save_ptr = save_ptr - sizeof(token) + 1;
     argv[argc] = intr->esp;
     argc++;
 
-    // If the size of argc is less than 2 bits
+    // If the size of argc is greater than 2 bits
     if(argc >= bits)
     { 
       // Multiply to keep track of the bits
@@ -134,12 +132,37 @@ char* args_parse(struct intr_frame intr, char *args)
     memcpy(save_ptr, token, sizeof(token) +1);
   }
 
+  // Need to set the last arg to 0 before setting 
+  // the arg array on the stack
+  argv[argc] = 0;
+  // Align the word by 4 to get offset
+  uint8_t word_align = save_ptr % 4;
+  memcpy(save_ptr, argv[argc], word_align);
 
-  uint8_t word_align = 0;
+  /* Now we need to push on argv[n], argv[n-1]...argv[0] */
 
- 
+  for(i = argc-1; i >= 0; i--)
+  {
+    save_ptr -= sizeof(char*);
+    memcpy(save_ptr, &argv[i], sizeof(char*));
+  }
+
+  // Push on argv
+  char *temp = *save_ptr;
+  save_ptr -= sizeof(char**);
+  memcpy(save_ptr, &temp, sizeof(char**));
+
+  // Push on argc
+  save_ptr -= sizeof(int);
+  memcpy(save_ptr, &argc, sizeof(int));
 
 
+  // Push on return address
+  save_ptr -= sizeof(void *);
+  memcpy(save_ptr, &argv[argc] , sizeof(void*));
+
+
+  free(argv);
 
 }
 
