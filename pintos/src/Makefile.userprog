@@ -38,10 +38,20 @@ endef
 
 $(foreach prog,$(PROGS),$(eval $(call TEMPLATE,$(prog))))
 
+AR = ar
+RANLIB = ranlib
+
+
+# Check if building on Mac OS X
+ifneq (0, $(shell expr `uname` : 'Darwin'))
+    AR = i386-elf-ar
+    RANLIB = i386-elf-ranlib
+endif
+
 libc.a: $(LIB_OBJ)
 	rm -f $@
-	ar r $@ $^
-	ranlib $@
+	$(AR) r $@ $^
+	$(RANLIB) $@
 
 clean::
 	rm -f $(PROGS) $(PROGS_OBJ) $(PROGS_DEP)
