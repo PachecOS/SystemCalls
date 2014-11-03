@@ -1,7 +1,7 @@
 #ifndef USERPROG_SYSCALL_H
 #define USERPROG_SYSCALL_H
 #include "threads/synch.h"
-
+/*
 void syscall_init (void);
 void halt (void);
 void exit (int status);
@@ -16,7 +16,7 @@ int write (int fd, const void *buffer, unsigned size);
 void seek (int fd, unsigned position);
 unsigned tell (int fd);
 void close (int fd);
-
+*/
 struct child_p {
 	int load;
 	int pid;
@@ -33,14 +33,3 @@ struct file_attr {
 };
 
 #endif /* userprog/syscall.h */
-
-
-/*
-QUESTIONS FOR MYSELF:
-- Where do we create the monitors?
-- How are monitors used in exec/wait?
-- How to set up stack?
-- Where do we keep track of file descriptors?
-- How do we put our children list in to our thread?
-- How to synchornize properly?
-- 

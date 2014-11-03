@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "threads/malloc.h"
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
 #include "userprog/tss.h"
@@ -21,14 +22,14 @@
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
-/* Initialize the start struct */
+/* Initialize the start struct 
 void
 start_struct_init(struct start_struct *ss, unsigned value, char* fn)
 {
   ss->start_synch = value;
   ss->success = 0;
   ss->fn_copy = fn;
-}
+} */
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -40,8 +41,9 @@ process_execute (const char *file_name)
   // Need to modify this method
   char *fn_copy;
   char *parse;
+  char *file;
   tid_t tid;
-  struct start_struct *start;
+  //struct start_struct *start;
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
@@ -49,18 +51,19 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
-  start_struct_init(&start, 0, fn_copy);
-  sema_down(start->start_synch);
+  //start_struct_init(&start, 0, fn_copy);
+  //sema_down(start->start_synch);
 
-  if(start->success)
+ /* if(start->success)
   {
 
-  }
+  } */
 
   // Parse by strings
-  parse = strtok_r((char*) file_name, " ", parse);
+  file = strtok_r(file_name, " ", &parse);
+  //printf("%s", file_name);
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, start->fn_copy);
+  tid = thread_create (file, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   return tid;
@@ -71,11 +74,11 @@ process_execute (const char *file_name)
 static void
 start_process (void *file_name_)
 {
+  printf("Entering start process");
   char *file_name = file_name_;
+  printf("The filename is %s", file_name);
   struct intr_frame if_;
   bool success;
-  char *args;
-  int i = 0;
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
@@ -83,15 +86,80 @@ start_process (void *file_name_)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
-
+  printf("The load was a success");
   /* If load failed, quit. */
   palloc_free_page (file_name);
   if (!success)
   { 
+    printf("i am doing a thread exit.");
     thread_exit ();
   }
 
-  args = args_parse(if_, file_name);
+  char *token;
+  char **argv = malloc((sizeof(char*) * 2));
+
+  int i, argc = 0; 
+  int word_align;
+  int bits = 2;
+
+  // Iterate each token
+  for(token = (char*) file_name; token != NULL; 
+                                  token = strtok_r(NULL, " ", if_.esp))
+  {
+    printf("This is the token: %s", token);
+    if_.esp = if_.esp - (strlen(token) + 1);
+    argv[argc] = if_.esp;
+    argc++;
+    printf("The arg count is : %d", argc);
+
+    // If the size of argc is greater than 2 bits
+    if(argc >= bits)
+    { 
+      // Multiply to keep track of the bits
+      bits = bits * 2;
+      // Realloc the size of the argv array to the size of the bits
+      argv = realloc(argv, bits*sizeof(char *));
+    }    
+    // Copy the token (args) in to the save_ptry (the stack)
+    memcpy(if_.esp, token, (strlen(token) +1));
+  }
+
+  // Need to set the last arg to 0 before setting 
+  // the arg array on the stack
+  argv[argc] = 0;
+  // Align the word by 4 to get offset
+  word_align = (size_t ) if_.esp % 4;
+  if(word_align)
+  {
+    if_.esp -= word_align; // 4-word_align
+    memcpy(if_.esp, &argv[argc], word_align);
+  }
+
+  /* Now we need to push on argv[n], argv[n-1]...argv[0] */
+
+  for(i = argc-1; i >= 0; i--)
+  {
+    if_.esp -= sizeof(char*);
+    memcpy(if_.esp, &argv[i], sizeof(char*));
+  }
+
+  // Push on argv
+  char *temp = if_.esp;
+  if_.esp -= sizeof(char**);
+  memcpy(if_.esp, &temp, sizeof(char**));
+
+  // Push on argc
+  if_.esp -= sizeof(int);
+  memcpy(if_.esp, &argc, sizeof(int));
+
+
+  // Push on return address
+  if_.esp -= sizeof(void *);
+  memcpy(if_.esp, &argv[argc] , sizeof(void*));
+
+
+  free(argv);
+
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -102,46 +170,6 @@ start_process (void *file_name_)
   NOT_REACHED ();
 }
 
-static
-char* args_parse(struct intr_frame intr, char *args)
-{
-  char *token;
-  char **save_ptr = intr->esp;
-  char *save_args_temp = malloc(sizeof(char*));
-  char **argv = malloc(sizeof(sizeof(char*)) * 2);
-
-  int i, argc = 0; 
-  int align;
-  int bits = 2;
-
-  // Iterate each token
-  for(token = (char*) args; token != NULL; 
-                                  token = strtok_r(NULL, " ", save_ptr))
-  {
-    intr->esp = intr->esp - sizeof(token) + 1;
-    argv[argc] = intr->esp;
-    argc++;
-
-    // If the size of argc is less than 2 bits
-    if(argc >= bits)
-    { 
-      // Multiply to keep track of the bits
-      bits = bits * 2;
-      // Realloc the size of the argv array to the size of the bits
-      argv = realloc(argv, bits*sizeof(char *));
-    }    
-    // Copy the token (args) in to the save_ptry (the stack)
-    memcpy(save_ptr, token, sizeof(token) +1);
-  }
-
-
-  uint8_t word_align = 0;
-
- 
-
-
-
-}
 
 /* Waits for thread TID to die and returns its exit status.  If
    it was terminated by the kernel (i.e. killed due to an
@@ -379,7 +407,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
+  //file_close (file);
   return success;
 }
 
@@ -504,7 +532,7 @@ setup_stack (void **esp)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
-        *esp = PHYS_BASE - esp;
+        *esp = PHYS_BASE - *esp;
       else
         palloc_free_page (kpage);
     }

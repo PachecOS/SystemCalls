@@ -101,12 +101,12 @@ struct thread
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
 
-    struct child_p cp;
-    struct list children;
+    struct child_p *cp;
+    struct list *children;
     tid_t parent;
-    struct list files;
+    struct list *files;
     int fd;
-    struct file exec_file;
+    struct file *exec_file;
 
   };
 
