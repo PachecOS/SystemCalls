@@ -74,7 +74,9 @@ process_execute (const char *file_name)
 static void
 start_process (void *file_name_)
 {
+  printf("Entering start process");
   char *file_name = file_name_;
+  printf("The filename is %s", file_name);
   struct intr_frame if_;
   bool success;
 
@@ -84,7 +86,7 @@ start_process (void *file_name_)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
-
+  printf("The load was a success");
   /* If load failed, quit. */
   palloc_free_page (file_name);
   if (!success)
@@ -104,9 +106,11 @@ start_process (void *file_name_)
   for(token = (char*) file_name; token != NULL; 
                                   token = strtok_r(NULL, " ", if_.esp))
   {
+    printf("This is the token: %s", token);
     if_.esp = if_.esp - (strlen(token) + 1);
     argv[argc] = if_.esp;
     argc++;
+    printf("The arg count is : %d", argc);
 
     // If the size of argc is greater than 2 bits
     if(argc >= bits)
