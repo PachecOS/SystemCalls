@@ -11,8 +11,8 @@ void process_activate (void);
 struct start_struct {
 	char *fn_copy;
 	struct semaphore *start_synch;
-	int success;
+	bool success;
 };
 
-void start_struct_init(struct start_struct *ss);
+// void start_struct_init(struct start_struct *ss);
 #endif /* userprog/process.h */

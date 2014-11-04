@@ -34,10 +34,10 @@ static struct thread *idle_thread;
 /* Initial thread, the thread running init.c:main(). */
 static struct thread *initial_thread;
 
+static struct list *files;
+
 /* Lock used by allocate_tid(). */
 static struct lock tid_lock;
-
-static struct wait_info_list;
 
 /* Stack frame for kernel_thread(). */
 struct kernel_thread_frame 
@@ -94,7 +94,8 @@ thread_init (void)
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
-  //list_init (&wait_info_list);
+  list_init(&files);
+  //list_init(&wait_resources_list);
 
 
   /* Set up a thread structure for the running thread. */
@@ -177,30 +178,36 @@ thread_create (const char *name, int priority,
   tid_t tid;
 
   ASSERT (function != NULL);
-
+  
   /* Allocate thread. */
   t = palloc_get_page (PAL_ZERO);
   if (t == NULL)
     return TID_ERROR;
-
+  
   /* Initialize thread. */
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
 
-  /* Stack frame for kernel_thread(). */
+  //old_level = intr_disable();
+  
+    /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
   kf->eip = NULL;
   kf->function = function;
   kf->aux = aux;
-
+  
   /* Stack frame for switch_entry(). */
   ef = alloc_frame (t, sizeof *ef);
   ef->eip = (void (*) (void)) kernel_thread;
-
+  
   /* Stack frame for switch_threads(). */
   sf = alloc_frame (t, sizeof *sf);
   sf->eip = switch_entry;
   sf->ebp = 0;
+  
+  //intr_set_level (old_level);
+  //t->parent = thread_tid();
+
 
   /* Add to run queue. */
   thread_unblock (t);
@@ -470,6 +477,10 @@ init_thread (struct thread *t, const char *name, int priority)
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
+
+  list_init(&t->files);
+  t->fd = 2;
+  list_init(&lock);
   intr_set_level (old_level);
 }
 

@@ -1,307 +1,418 @@
 #include "userprog/syscall.h"
 #include <stdio.h>
 #include <syscall-nr.h>
+#include <user/syscall.h>
+#include "devices/input.h"
+#include "devices/shutdown.h"
+#include "filesys/file.h"
+#include "filesys/filesys.h"
 #include "threads/interrupt.h"
+#include "threads/malloc.h"
+#include "threads/synch.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
+#include "userprog/pagedir.h"
+#include "userprog/process.h"
 
-//static void syscall_handler (struct intr_frame *);
-//static void strip_args(struct intr_frame *f, int total, int* arg);
+
+#define BOTTOM 0x08048000
+
+static void syscall_handler (struct intr_frame *);
+void syscall_init (void);
+int mem_switch_to_kernel(const void * ptr );
+void check_ptr(const void* addr);
+void strip_args(struct intr_frame *f, int total, int* arg);
+struct file* get_file (int fd);
 
 void
 syscall_init (void) 
 {
- // intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
+  lock_init(&lock);
+  intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
   printf("I am here. ");
 }
 
-// static void
-// syscall_handler (struct intr_frame *f UNUSED) 
-// {
-//   int arg[3];
-//   switch(*(int *) esp)
-//   {
-//   	case system_halt:
-//   	{
-//   		halt();
-//   		break;
-//   	}
-//   	case system_exit:
-//   	{
-//   		strip_args(f, 1, &arg[0]);
-//   		exit(arg[0]);
-//   		break;
-//   	}
-//   	case system_exec:
-//   	{
-//   		break;
-//   	}
-//   	case system_wait:
-//   	{
-//   		strip_args(f, 1, &arg[0]);
-//   		f->eax = wait(arg[0]);
-//   		break;
-//   	}
-//   	case system_remove:
-//   	{
-//   		f->eax = remove((const char*) arg[0]);
-//   		break;
-//   	}
-//   	case system_open:
-//   	{
-//   		f->eax = open((const char *) arg[0]);
-//   		break;
-//   	}
-//   	case system_filesize:
-//   	{
-//   		f->eax = filesize(arg[0]);
-//   		break;
-//   	}
-//   	case system_read:
-//   	{
-//   		f->eax = read(arg[0], (void *) arg[1], (unsigned) arg[2]);
-//   		break;
-//   	}
-//   	case system_write:
-//   	{
-//   		f->eax = write(arg[0], (const void *) arg[1], (unsigned) arg[2]);
-//   		break;
-//   	}
-//   	case system_seek:
-//   	{
-//   		strip_args(f, 2, &arg[0]);
-//   		seek(arg[0], (unsigned) arg[1]);
-//   		break;
-//   	}
-//   	case system_tell:
-//   	{
-//   		strip_args(f, 1, &arg[0]);
-//   		f->eax = tell(arg[0]);
-//   		break;
-//   	}
-//   	case system_close:
-//   	{
-//   		strip_args(f, 1, &arg[0]);
-//   		close(arg[0]);
-//   		break;
-//   	}
+static void
+syscall_handler (struct intr_frame *f UNUSED) 
+{
+  printf("Syscall handler has beeen hit. MAN DOWN!!\n");
+  int arg[3];
+ int esp = mem_switch_to_kernel((const void*) f->esp);
+  switch(*(int *) esp)
+  {
+  	case SYS_HALT:
+  	{
+  		halt();
+  		break;
+  	}
+  	case SYS_EXIT:
+  	{
+  		strip_args(f, 1, &arg[0]);
+  		exit(arg[0]);
+  		break;
+  	}
+  	case SYS_EXEC:
+  	{
+  		strip_args(f, &arg[0], 1);
 
-//   }
-// }
+  		arg[0] = mem_switch_to_kernel((const void*)arg[0]);
+  		f->eax = exec((const char*) arg[0]);
+  		break;
+  	}
+  	case SYS_WAIT:
+  	{
+  		strip_args(f, 1, &arg[0]);
+  		f->eax = wait(arg[0]);
+  		break;
+  	}
+  	case SYS_REMOVE:
+  	{
+  		strip_args(f, 1, &arg[0]);
 
-// static void
-// strip_args(struct intr_frame *f, int total, int* arg)
-// {
-// 	int i;
-// 	int *temp;
-// 	for(i = 0; i < total; i++)
-// 	{
-// 		temp = f->esp + i + 1;
-// 		if(temp < (void *) 0x08048000)
-// 		{
-// 			exit(-1);
-// 		}
+  		arg[0] = mem_switch_to_kernel((const void*) arg[0]);
+  		f->eax = remove((const char*) arg[0]);
+  		break;
+  	}
+  	case SYS_CREATE:
+  	{
+  		strip_args(f, 2, &arg[0]);
 
-// 		if(!temp < (void *) 0xc0000000)
-// 		{
-// 			exit(-1);
-// 		}
-// 	}
-// }
+  		arg[0] = mem_switch_to_kernel((const void*) arg[0]);
+  		f->eax = create((const char*) arg[0], (unsigned)arg[1]);
+  		break;
+  	}
+  	case SYS_OPEN:
+  	{
+  		strip_args(f, 1, &arg[0]);
 
-// /* Terminates Pintos by calling shutdown_power_off() */
-// void
-// halt(void)
-// {
-// 	shutdown_power_off();
-// }
+  		arg[0] = mem_switch_to_kernel((const void*) arg[0]);
+  		f->eax = open((const char *) arg[0]);
+  		break;
+  	}
+  	case SYS_FILESIZE:
+  	{
+  		strip_args(f, 3, &arg[0]);
+  		f->eax = filesize(arg[0]);
+  		break;
+  	}
+  	case SYS_READ:
+  	{
+  		f->eax = read(arg[0], (void *) arg[1], (unsigned) arg[2]);
+  		break;
+  	}
+  	case SYS_WRITE:
+  	{
+  		printf("MAN IS UP NOW!!!\n");
+  		f->eax = write(arg[0], (const void *) arg[1], (unsigned) arg[2]);
+  		break;
+  	}
+  	case SYS_SEEK:
+  	{
+  		strip_args(f, 2, &arg[0]);
+  		seek(arg[0], (unsigned) arg[1]);
+  		break;
+  	}
+  	case SYS_TELL:
+  	{
+  		strip_args(f, 1, &arg[0]);
+  		f->eax = tell(arg[0]);
+  		break;
+  	}
+  	case SYS_CLOSE:
+  	{
+  		strip_args(f, 1, &arg[0]);
+  		close(arg[0]);
+  		break;
+  	}
 
-// /* Terminates the current user program */
-// void
-// exit (int status) 
-// {
-// 	struct thread *curr = thread_current();
+  }
+}
 
-// 	if(wait(curr->parent))
-// 	{
-// 		status = curr->cp->status;
-// 	}
-// 	printf("%s: exit(%d)\n", curr->name, status);
-// 	process_exit();
-// }
-// /* Runs the executable whose name is given in cmd_line*/
-// pid_t
-// exec(const char* cmd_line)
-// {
-// 	pid_t name = process_execute(cmd_line);
+/* The purpose of this funciton is to get the
+   page that maps the kernel address corressponding
+   to the physical address. Returns the pointer
+   to that space */
+int
+mem_switch_to_kernel(const void * ptr )
+{
+	struct thread *t = thread_current();
+	uint32_t page = (uint32_t)t->pagedir;
+	void * valid = pagedir_get_page((uint32_t *)page, ptr);
 
-// 	if(load(name, void (**eip) (void), void **esp))
-// 	{
+	if(valid == NULL)
+	{
+		exit(-1);
+	} 
 
-// 	}
+	return (int) valid;
+}
 
+/* Checks if the pointer is valid i.e if it is 
+   in between PHYS_BASE and 0x08048000 */
+void
+check_ptr(const void* addr)
+{
+	if(addr < (void *)BOTTOM) 
+	{
+		exit(-1);
+	}
 
-	
-// }
+	if(!addr < (void *)PHYS_BASE)
+	{
+		exit(-1);
+	}
 
-// /* Waits for a child process pid and retrieves the childs
-//    exit status */
-// int
-// wait (pid_t pid) 
-// {
-// 	return process_wait(pid);
-// }
+}
 
-// /* Creates a new file *file intially sized initial_size
-//    in bytes */
-// bool
-// create (const char *file, unsigned initial_size)
-// {
-// 	bool created;
-// 	lock_acquire(&lock);
-// 	if(filesys_create(file, intial_size) == true)
-// 	{
-// 		created == true;
-// 		return created;
-// 	} else {
-// 		created == false;
-// 		return created;
-// 	}
-// 	lock_release(&lock);
-// }
+/* Gets the args off of the stack */
+void
+strip_args(struct intr_frame *f, int total, int* arg)
+{
+	int i;
+	int *temp;
+	for(i = 0; i < total; i++)
+	{
+		temp = (int *)f->esp + i + 1;
+		check_ptr((const void*)temp);
+		arg[i] = *temp;
+	}
+}
 
-// bool
-// remove (const char *file)
-// {
-// 	bool removed;
-// 	lock_acquire(&lock);
-// 	if(filesys_remove(file) == true)
-// 	{
-// 		removed == true;
-// 		return removed;
-// 	} else {
-// 		removed == false;
-// 		return removed;
-// 	}
-// 	lock_release(&lock);
-// }
+/* Terminates Pintos by calling shutdown_power_off() */
+void
+halt(void)
+{
+	shutdown_power_off();
+}
 
-// int
-// open (const char *file)
-// {
-// 	lock_acquire(&lock);
-// 	struct file *f = filesys_open(file);
-// 	struct thread *t = thread_current();
-// 	// Space for the file attr struct 
-// 	struct file_attr *fa = malloc(sizeof (struct file_attr));
-// 	fa ->file = f;
+/* Terminates the current user program */
+void
+exit (int status) 
+{
 
-// 	// Need to check if the file attr is valid
-// 	if(!fa) 
-// 	{
-// 		lock_release(&lock);
-// 		return -1;
-// 	}
-// 	// Update the fd's and the thread's fd
-// 	fa->fd = t->fd;
-// 	t->fd++;
+}
+/* Runs the executable whose name is given in cmd_line*/
+pid_t
+exec(const char* cmd_line)
+{
+	pid_t name = process_execute(cmd_line);
+		
+}
 
-// 	// Put the file elem on that thread's file list
-// 	list_push_back(t->files, fa->elem);
-// 	free(fa);
-// 	lock_release(&lock);
-// 	return fa->fd;
-	
+/* Waits for a child process pid and retrieves the childs
+   exit status */
+int
+wait (pid_t pid) 
+{
+	return process_wait(pid);
+}
 
-// }
+/* Creates a new file *file intially sized initial_size
+   in bytes */
+bool
+create (const char *file, unsigned initial_size)
+{
+	bool created = false;
+	lock_acquire(&lock);
+	if(filesys_create(file, initial_size))
+	{
+		created = true;
+		return created;
+	} else {
+		return created;
+	}
+	lock_release(&lock);
+}
 
-// /* Returns the size, in bytes, of the file open as fd */
-// int
-// filesize (int fd)
-// {
-// 	lock_acquire(&lock);
-// 	for (e = list_begin (&files); e != list_end (&files);
-//        e = list_next (e))
-//     {
-//       struct file_attr *fa = list_entry (e, struct file_attr, elem);
-//       if(fa->fd == fd) 
-//       {
-//       	int size = file_length(fa->elem);
-//       }
-//     }
-// 	lock_release(&lock);
-// 	return size;
-// }
+bool
+remove (const char *file)
+{
+	bool removed = false;
+	lock_acquire(&lock);
+	if(filesys_remove(file) == true)
+	{
+		removed = true;
+		return removed;
+	} else {
+		return removed;
+	}
+	lock_release(&lock);
+}
 
-// /* Reads size bytes from the file open as fd into buffer.
-//    Returns the number of bytes actually read (0 at the
-//    end of a file), or -1 if the file could not be read.
-//    Fd 0 reads from the keyboard using input_getc(). */
-// int
-// read (int fd, void *buffer, unsigned size)
-// {
-// 	int i;
-// 	uint8_t* buff = (uint8_t *) buffer;
-	
-// }
+int
+open (const char *file)
+{
+	lock_acquire(&lock);
+	struct file *f = filesys_open(file);
+	struct thread *t = thread_current();
+	// Space for the file attr struct 
+	struct file_attr *fa = malloc(sizeof (struct file_attr));
+	fa ->file = f;
 
-// int
-// write (int fd, const void *buffer, unsigned size)
-// {
+	// Need to check if the file attr is valid
+	if(!fa) 
+	{
+		lock_release(&lock);
+		return -1;
+	}
+	// Update the fd's and the thread's fd
+	fa->fd = t->fd;
+	t->fd++;
 
-// }
-
-// void
-// seek (int fd, unsigned position)
-// {
-
-// }
-
-// /* Returns the position of the next byte to be read
-//    or written in open file fd, expressed as in bytes
-//    from the beginning of the file. */
-// unsigned 
-// tell (int fd)
-// {
-// 	lock_acquire(&lock);
-// 	struct file *f;
-// 	// Get the file attributed to this fd
-// 	f = get_file(fd);
-// 	if(f != NULL) 
-// 	{
-// 		// file_tell gets the offset of the next byte
-// 		off_t next = file_tell(f->file);
-// 	}
-// 	lock_release(&lock);
-// 	return next;
+	// Put the file elem on that thread's file list
+	list_push_back(t->files, fa->elem);
+	free(fa);
+	lock_release(&lock);
+	return fa->fd;
 	
 
-// }
+}
 
-// struct 
-// file* get_file (int fd)
-// {
-// 	struct threat *t = thread_current();
-// 	struct list_elem *e;
+/* Returns the size, in bytes, of the file open as fd */
+int
+filesize (int fd)
+{
+	struct list_elem *e;
+	struct list *files;
+	lock_acquire(&lock);
+	for (e = list_begin (files); e != list_end (files);
+       e = list_next (e))
+    {
+      struct file_attr *fa = list_entry (e, struct file_attr, elem);
+      if(fa->fd == fd) 
+      {
+      	int size = file_length(fa->elem);
+      }
+    }
+	lock_release(&lock);
+	return size;
+}
 
-// 	for(e = list_begin(&files); e != list_end(&files); e = list_next(e))
-// 	{
-// 		struct file_attr fa = list_entry(e, struct file_attr, elem);
-// 		if(fa->fd == fd)
-// 		{
-// 			return fa->file;
-// 		} 
-// 		else 
-// 		{
-// 			return NULL;
-// 		}
-// 	}
-// }
+/* Reads size bytes from the file open as fd into buffer.
+   Returns the number of bytes actually read (0 at the
+   end of a file), or -1 if the file could not be read.
+   Fd 0 reads from the keyboard using input_getc(). */
+int
+read (int fd, void *buffer, unsigned size)
+{
+	int i;
+	uint8_t* l_buff = (uint8_t*) buffer;
 
-// void
-// close (int fd)
-// {
+	if(fd == READ)
+	{
+		for(i = 0; i < size; i++)
+		{
+			l_buff[i] = input_getc();
+ 		}
+ 		return size;
+	}
 
-// }
+	lock_acquire(&lock);
+	struct file *f = get_file(fd);
+	int read_f = file_read(f, buffer, size);
+	
+	lock_release(&lock);
+	return read_f;
+}
+
+int
+write (int fd, const void *buffer, unsigned size)
+{	
+	if(fd == WRITE)
+	{
+		putbuf(buffer, size);
+		return size;
+	}
+
+	lock_acquire(&lock);
+	struct file *f = get_file(fd);
+	int file_w = file_write(f, buffer, size);
+	lock_release(&lock);
+	return file_w;
+}
+
+void
+seek (int fd, unsigned position)
+{	
+	lock_acquire(&lock);
+	struct file *f;
+	struct list_elem *e;
+	f = get_file(fd);
+
+	for(e = list_begin(&files); e != list_end(&files); e = list_next(e))
+	{
+		struct file_attr *fa = list_entry(e, struct file_attr, elem);
+		if(fa->fd == fd)
+		{
+			file_seek(fa->file, position);
+		}
+	}
+	lock_release(&lock);
+}
+
+/* Returns the position of the next byte to be read
+   or written in open file fd, expressed as in bytes
+   from the beginning of the file. */
+unsigned 
+tell (int fd)
+{
+	lock_acquire(&lock);
+	struct file *f;
+	off_t next;
+	// Get the file attributed to this fd
+	f = get_file(fd);
+	if(f != NULL) 
+	{
+		// file_tell gets the offset of the next byte
+		next = file_tell(f->file);
+	}
+	lock_release(&lock);
+	return next;
+	
+
+}
+
+/* Helper function that returns the file associated to the FD
+   int fd. */
+struct 
+file* get_file (int fd)
+{
+	struct threat *t = thread_current();
+	struct list_elem *e;
+	struct list *files;
+
+	for(e = list_begin(t->files); e != list_end(t->files); e = list_next(e))
+	{
+		struct file_attr *fa = list_entry(e, struct file_attr, elem);
+		if(fa->fd == fd)
+		{
+			return fa->file;
+		} 
+		else 
+		{
+			return NULL;
+		}
+	}
+}
+
+void
+close (int fd)
+{
+	lock_acquire(&lock);
+	struct thread *t = thread_current();
+	struct file_attr *fa;
+	struct list_elem *e;
+	for(e = list_begin(t->files); e != list_end(t->files); e = list_next(e))
+	{
+		fa = list_entry(e, struct file_attr, elem);
+		if(fa->fd == fd)
+		{
+			file_close(fa->file);
+		}
+	}
+	lock_release(&lock);
+
+}
 
 
 

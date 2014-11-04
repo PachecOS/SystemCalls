@@ -3,6 +3,7 @@
 
 #include <list.h>
 #include <stdbool.h>
+#include "threads/process.h"
 
 /* A counting semaphore. */
 struct semaphore 
@@ -41,7 +42,7 @@ void cond_wait (struct condition *, struct lock *);
 void cond_signal (struct condition *, struct lock *);
 void cond_broadcast (struct condition *, struct lock *);
 
-/* Monitor struct for System Calls 
+// Monitor struct for System Calls 
 struct wait_info 
 {
   struct lock mutex_lock;
@@ -53,7 +54,7 @@ struct wait_info
   bool parent_waiting_on_child;
 
 };
-*/
+
 
 /* Optimization barrier.
 

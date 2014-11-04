@@ -18,18 +18,11 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "threads/synch.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
-/* Initialize the start struct 
-void
-start_struct_init(struct start_struct *ss, unsigned value, char* fn)
-{
-  ss->start_synch = value;
-  ss->success = 0;
-  ss->fn_copy = fn;
-} */
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -43,29 +36,31 @@ process_execute (const char *file_name)
   char *parse;
   char *file;
   tid_t tid;
-  //struct start_struct *start;
+  struct start_struct *start;
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
-
-  //start_struct_init(&start, 0, fn_copy);
-  //sema_down(start->start_synch);
-
- /* if(start->success)
-  {
-
-  } */
+  // Initialize the start struct and update its members
+  start = malloc(sizeof(struct start_struct *));
+  sema_init(start->start_synch, 0);
+  start->fn_copy = (char *)fn_copy;
+  // Sema_down so no other threads runs while this one does
+  sema_down(start->start_synch);
 
   // Parse by strings
-  file = strtok_r(file_name, " ", &parse);
-  //printf("%s", file_name);
+  file = strtok_r((char *)file_name, " ", &parse);
+    
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (file, PRI_DEFAULT, start_process, start);
+
+    
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
+
+  free(start);
   return tid;
 }
 
@@ -74,24 +69,24 @@ process_execute (const char *file_name)
 static void
 start_process (void *file_name_)
 {
-  printf("Entering start process");
+  printf("Entering start process\n");
+  struct start_struct *ss = file_name_;
   char *file_name = file_name_;
-  printf("The filename is %s", file_name);
+  printf("The filename is %s\n", file_name);
   struct intr_frame if_;
-  bool success;
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
-  printf("The load was a success");
+  ss->success = load (file_name, &if_.eip, &if_.esp);
+  printf("The load was a success\n");
   /* If load failed, quit. */
   palloc_free_page (file_name);
-  if (!success)
+  if (!ss->success)
   { 
-    printf("i am doing a thread exit.");
+    printf("i am doing a thread exit.\n");
     thread_exit ();
   }
 
@@ -106,11 +101,11 @@ start_process (void *file_name_)
   for(token = (char*) file_name; token != NULL; 
                                   token = strtok_r(NULL, " ", if_.esp))
   {
-    printf("This is the token: %s", token);
+    printf("This is the token: %s\n", token);
     if_.esp = if_.esp - (strlen(token) + 1);
     argv[argc] = if_.esp;
     argc++;
-    printf("The arg count is : %d", argc);
+    printf("The arg count is : %d\n", argc);
 
     // If the size of argc is greater than 2 bits
     if(argc >= bits)
