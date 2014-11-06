@@ -101,14 +101,19 @@ struct thread
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
 
-    // struct child_p *cp;
-    // struct list *children;
 
-    //tid_t parent;
+    tid_t parent;
     struct list lock;
+    struct list child_list;
+    
+    // For system calls using read/write
     struct list *files;
+    struct file *executable_file;
     int fd;
-    struct file *exec_file;
+
+    // List of monitors for exit/wait synch
+    struct list wait_info_resources_list;
+    struct wait_info *w_info;   /* Process metadata */
 
   };
 

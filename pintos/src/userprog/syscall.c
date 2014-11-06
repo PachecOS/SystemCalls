@@ -14,7 +14,7 @@
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
 
-
+#define Phys 0xc0000000
 #define BOTTOM 0x08048000
 
 static void syscall_handler (struct intr_frame *);
@@ -53,7 +53,7 @@ syscall_handler (struct intr_frame *f UNUSED)
   	}
   	case SYS_EXEC:
   	{
-  		strip_args(f, &arg[0], 1);
+  		strip_args(f, 1, &arg[0]);
 
   		arg[0] = mem_switch_to_kernel((const void*)arg[0]);
   		f->eax = exec((const char*) arg[0]);
@@ -157,7 +157,7 @@ check_ptr(const void* addr)
 		exit(-1);
 	}
 
-	if(!addr < (void *)PHYS_BASE)
+	if(!(addr < (void *)Phys))
 	{
 		exit(-1);
 	}
@@ -189,13 +189,14 @@ halt(void)
 void
 exit (int status) 
 {
-
+	status = 1;
 }
 /* Runs the executable whose name is given in cmd_line*/
 pid_t
 exec(const char* cmd_line)
 {
 	pid_t name = process_execute(cmd_line);
+	return name;
 		
 }
 
@@ -260,7 +261,7 @@ open (const char *file)
 	t->fd++;
 
 	// Put the file elem on that thread's file list
-	list_push_back(t->files, fa->elem);
+	list_push_back(t->files, &fa->elem);
 	free(fa);
 	lock_release(&lock);
 	return fa->fd;
@@ -272,18 +273,9 @@ open (const char *file)
 int
 filesize (int fd)
 {
-	struct list_elem *e;
-	struct list *files;
 	lock_acquire(&lock);
-	for (e = list_begin (files); e != list_end (files);
-       e = list_next (e))
-    {
-      struct file_attr *fa = list_entry (e, struct file_attr, elem);
-      if(fa->fd == fd) 
-      {
-      	int size = file_length(fa->elem);
-      }
-    }
+	struct file *f = get_file(fd);
+	int size = file_length(f);
 	lock_release(&lock);
 	return size;
 }
@@ -300,7 +292,7 @@ read (int fd, void *buffer, unsigned size)
 
 	if(fd == READ)
 	{
-		for(i = 0; i < size; i++)
+		for(i = 0; i < (int)size; i++)
 		{
 			l_buff[i] = input_getc();
  		}
@@ -335,18 +327,8 @@ void
 seek (int fd, unsigned position)
 {	
 	lock_acquire(&lock);
-	struct file *f;
-	struct list_elem *e;
-	f = get_file(fd);
-
-	for(e = list_begin(&files); e != list_end(&files); e = list_next(e))
-	{
-		struct file_attr *fa = list_entry(e, struct file_attr, elem);
-		if(fa->fd == fd)
-		{
-			file_seek(fa->file, position);
-		}
-	}
+	struct file *f = get_file(fd);
+	file_seek(f, position);
 	lock_release(&lock);
 }
 
@@ -357,14 +339,13 @@ unsigned
 tell (int fd)
 {
 	lock_acquire(&lock);
-	struct file *f;
-	off_t next;
+	struct file *f = get_file(fd);
+	int next = 0;
 	// Get the file attributed to this fd
-	f = get_file(fd);
 	if(f != NULL) 
 	{
 		// file_tell gets the offset of the next byte
-		next = file_tell(f->file);
+		next = file_tell(f);
 	}
 	lock_release(&lock);
 	return next;
@@ -372,14 +353,44 @@ tell (int fd)
 
 }
 
+void
+close (int fd)
+{
+	lock_acquire(&lock);
+	struct thread *t = thread_current();
+	struct list_elem *e;
+	for(e=list_begin(t->files); e != list_end(t->files); e = list_next(e))
+	{
+		struct file_attr *fa = list_entry(e, struct file_attr, elem);
+		if(fa->fd == fd)
+		{
+			file_close(fa->file);
+			list_remove(&fa->elem);
+			free(fa);
+		}
+		if(fd == -1)
+		{
+			file_close(fa->file);
+			list_remove(&fa->elem);
+			free(fa);
+		}
+		else if(fd > -1)
+		{
+			return;
+		}
+	}
+	lock_release(&lock);
+
+}
+
+
 /* Helper function that returns the file associated to the FD
    int fd. */
 struct 
 file* get_file (int fd)
 {
-	struct threat *t = thread_current();
+	struct thread *t = thread_current();
 	struct list_elem *e;
-	struct list *files;
 
 	for(e = list_begin(t->files); e != list_end(t->files); e = list_next(e))
 	{
@@ -394,25 +405,3 @@ file* get_file (int fd)
 		}
 	}
 }
-
-void
-close (int fd)
-{
-	lock_acquire(&lock);
-	struct thread *t = thread_current();
-	struct file_attr *fa;
-	struct list_elem *e;
-	for(e = list_begin(t->files); e != list_end(t->files); e = list_next(e))
-	{
-		fa = list_entry(e, struct file_attr, elem);
-		if(fa->fd == fd)
-		{
-			file_close(fa->file);
-		}
-	}
-	lock_release(&lock);
-
-}
-
-
-

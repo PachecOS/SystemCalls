@@ -19,10 +19,16 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "threads/synch.h"
+#include "userprog/syscall.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
+struct start_struct {
+  char *fn_copy;
+  struct semaphore start_synch;
+  bool success;
+};
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -31,12 +37,13 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp);
 tid_t
 process_execute (const char *file_name) 
 {
+  printf("I am starting execute.\n");
   // Need to modify this method
   char *fn_copy;
   char *parse;
   char *file;
   tid_t tid;
-  struct start_struct *start;
+  struct start_struct start;
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
@@ -44,23 +51,23 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
   // Initialize the start struct and update its members
-  start = malloc(sizeof(struct start_struct *));
-  sema_init(start->start_synch, 0);
-  start->fn_copy = (char *)fn_copy;
-  // Sema_down so no other threads runs while this one does
-  sema_down(start->start_synch);
+  //start = (struct start_struct *) malloc(sizeof(struct start_struct));
+  sema_init(&(start.start_synch), 0);
+  start.fn_copy = (char *) fn_copy;
+  start.success = false;
 
   // Parse by strings
   file = strtok_r((char *)file_name, " ", &parse);
     
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file, PRI_DEFAULT, start_process, start);
+  tid = thread_create (file, PRI_DEFAULT, start_process, &start);
 
-    
+  sema_down(&(start.start_synch));
   if (tid == TID_ERROR)
+  {
     palloc_free_page (fn_copy); 
-
-  free(start);
+  }
+  //free(start);
   return tid;
 }
 
@@ -70,42 +77,51 @@ static void
 start_process (void *file_name_)
 {
   printf("Entering start process\n");
-  struct start_struct *ss = file_name_;
-  char *file_name = file_name_;
-  printf("The filename is %s\n", file_name);
+  struct start_struct *ss = (struct start_struct *) file_name_;
   struct intr_frame if_;
+  char *parse_ptr, *file_name_copy;
+  printf("The fn_copy: %s\n", ss->fn_copy);
+  printf("The success: %d\n", ss->success);
+
+  char *save_ptr = ss->fn_copy;
+  bool success = ss->success;
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  ss->success = load (file_name, &if_.eip, &if_.esp);
-  printf("The load was a success\n");
+  printf("Before load\n");
+  success = load (save_ptr, &if_.eip, &if_.esp);
+  printf("SUCCESSSSSS\n");
   /* If load failed, quit. */
-  palloc_free_page (file_name);
-  if (!ss->success)
+  palloc_free_page (save_ptr);
+  if (!success)
   { 
     printf("i am doing a thread exit.\n");
+    sema_up(&(ss->start_synch));
     thread_exit ();
   }
+
+  save_ptr = palloc_get_page (0);
+  (void *)lookup = (void *) pagedir_get_page(&save_ptr, &if_.esp);
+
+
 
   char *token;
   char **argv = malloc((sizeof(char*) * 2));
 
   int i, argc = 0; 
-  int word_align;
+  int word_align = 0;
   int bits = 2;
 
   // Iterate each token
-  for(token = (char*) file_name; token != NULL; 
-                                  token = strtok_r(NULL, " ", if_.esp))
+  for(token = (char*) save_ptr; token != NULL; 
+                                  token = strtok_r(NULL, " ", (char **) &if_.esp))
   {
-    printf("This is the token: %s\n", token);
     if_.esp = if_.esp - (strlen(token) + 1);
     argv[argc] = if_.esp;
     argc++;
-    printf("The arg count is : %d\n", argc);
 
     // If the size of argc is greater than 2 bits
     if(argc >= bits)
@@ -122,14 +138,14 @@ start_process (void *file_name_)
   // Need to set the last arg to 0 before setting 
   // the arg array on the stack
   argv[argc] = 0;
-  // Align the word by 4 to get offset
-  word_align = (size_t ) if_.esp % 4;
-  if(word_align)
-  {
-    if_.esp -= word_align; // 4-word_align
-    memcpy(if_.esp, &argv[argc], word_align);
-  }
 
+  while(!(((uint32_t) if_.esp % 4) == 0))
+  {
+    word_align = (int) --if_.esp;
+    word_align = 0;
+  }
+  memcpy(if_.esp, &argv[argc], word_align);
+  
   /* Now we need to push on argv[n], argv[n-1]...argv[0] */
 
   for(i = argc-1; i >= 0; i--)
@@ -154,6 +170,7 @@ start_process (void *file_name_)
 
 
   free(argv);
+  sema_up(&(ss->start_synch));
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -165,6 +182,19 @@ start_process (void *file_name_)
   NOT_REACHED ();
 }
 
+/*
+void
+wait_info_init(struct wait_info *w_info)
+{
+  lock_init(&(w_info->mutex_lock));
+  cond_init(&(w_info->completed));
+  w_info->status = 0;
+  w_info->child_pid = child_pid;
+  w_info->child_exit = false;
+  w_info->parent_exit = false;
+  w_info->parent_waiting_on_child = false;
+}
+*/
 
 /* Waits for thread TID to die and returns its exit status.  If
    it was terminated by the kernel (i.e. killed due to an
@@ -178,6 +208,19 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
+    // struct wait_info *w_info;
+    // wait_info_init(&w_info);
+    // struct thread *t = thread_current();
+    // struct list_elem *e;
+    // for(e = list_begin(t->wait_info_resources_list); e!=list_end(t->wait_info_resources_list)
+    //               e=list_next(e))
+    // {
+    //   w_info = list_entry(e, struct wait_info, elem);
+    //   if(w_info->child_pid == child_tid)
+    //   {
+
+    //   }
+    // }
   return -1;
 }
 
@@ -298,6 +341,7 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
 bool
 load (const char *file_name, void (**eip) (void), void **esp) 
 {
+  printf("I am in load.\n");
   struct thread *t = thread_current ();
   struct Elf32_Ehdr ehdr;
   struct file *file = NULL;
@@ -311,8 +355,12 @@ load (const char *file_name, void (**eip) (void), void **esp)
     goto done;
   process_activate ();
 
+  printf("the file name is: %s\n", file_name);
+  printf("foo\n");
   /* Open executable file. */
   file = filesys_open (file_name);
+  printf("the file name is: %s\n", file_name);
+
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", file_name);
@@ -402,7 +450,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  //file_close (file);
+  file_close (file);
   return success;
 }
 

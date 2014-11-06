@@ -3,7 +3,7 @@
 
 #include <list.h>
 #include <stdbool.h>
-#include "threads/process.h"
+#include "userprog/process.h"
 
 /* A counting semaphore. */
 struct semaphore 
@@ -48,7 +48,7 @@ struct wait_info
   struct lock mutex_lock;
   struct condition completed;
   int status;
-  pid_t child_pid;
+  //pid_t child_pid;
   bool child_exit;
   bool parent_exit;
   bool parent_waiting_on_child;
